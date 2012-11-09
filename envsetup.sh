@@ -988,6 +988,11 @@ function gdbwrapper()
     $ANDROID_TOOLCHAIN/$GDB -x "$@"
 }
 
+function gdbwrapper()
+{
+    $ANDROID_TOOLCHAIN/$GDB -x "$@"
+}
+
 function gdbclient()
 {
    local OUT_ROOT=$(get_abs_build_var PRODUCT_OUT)
