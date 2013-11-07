@@ -832,6 +832,13 @@ def WriteIncrementalOTAPackage(target_zip, source_zip, output_zip):
     print "Renaming " + src + " to " + renames[src].name
     script.RenameFile(src, renames[src].name)
 
+  if len(renames) > 0:
+    script.Print("Renaming files...")
+
+  for src in renames:
+    print "Renaming " + src + " to " + renames[src].name
+    script.RenameFile(src, renames[src].name)
+
   script.Print("Symlinks and permissions...")
 
   # Create all the symlinks that don't already exist, or point to
