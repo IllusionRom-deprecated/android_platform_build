@@ -34,16 +34,16 @@ except ImportError:
 
 # Config
 # set this to the default remote to use in repo
-default_rem = "illusionrom"
+default_rem = "ill"
 # set this to the default revision to use (branch/tag name)
 default_rev = "illusion-4.4"
 # set this to the remote that you use for projects from your team repos
-# example fetch="https://github.com/illusionrom"
-default_team_rem = "illusionrom"
+# example fetch="https://github.com/IllusionRom"
+default_team_rem = "ill"
 # this shouldn't change unless google makes changes
 local_manifest_dir = ".repo/local_manifests"
 # change this to your name on github (or equivalent hosting)
-android_team = "illusionrom"
+android_team = "IllusionRom"
 
 
 def check_repo_exists(git_data):
