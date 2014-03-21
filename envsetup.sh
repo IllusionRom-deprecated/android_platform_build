@@ -466,9 +466,9 @@ function brunch()
     breakfast $*
     if [ $? -eq 0 ]; then
         if [ ! -z "$2" ]; then
-            time mka bacon $2
+            mka bacon $2
         else
-            time mka bacon
+            mka bacon
         fi
     else
         echo "No such item in brunch menu. Try 'breakfast'"
