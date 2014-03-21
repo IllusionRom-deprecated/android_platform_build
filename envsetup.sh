@@ -463,9 +463,13 @@ function print_lunch_menu()
 
 function brunch()
 {
+    AUTOBUILD="";
     breakfast $*
     if [ $? -eq 0 ]; then
         if [ ! -z "$2" ]; then
+            if [ ! -z "$3" ]; then
+                AUTOBUILD=$3;
+            fi
             mka bacon $2
         else
             mka bacon
@@ -1386,6 +1390,22 @@ function godir () {
 
 # Make using all available CPUs
 function mka() {
+    SETIONICE="";
+    if [ ! -z "$AUTOBUILD" ]; then
+        if [ $AUTOBUILD == "autobuild" ]; then
+            SETIONICE="ionice -c3";
+            echo "";
+            echo "";
+            echo "##########################################################";
+            echo "##########################################################";
+            echo "## [MKA]: $AUTOBUILD detected! Using: $SETIONICE = IDLE! ##";
+            echo "##########################################################";
+            echo "##########################################################";
+            echo "";
+            echo "";
+        fi
+    fi
+
     case `uname -s` in
         Darwin)
             if [ ! -z "$2" ]; then
@@ -1396,9 +1416,9 @@ function mka() {
             ;;
         *)
             if [ ! -z "$2" ]; then
-                time schedtool -B -e make "$@"
+                time schedtool -B -e $SETIONICE make "$@"
             else
-                time schedtool -B -e make -j "$(( $(cat /proc/cpuinfo | grep "^processor" | wc -l) * 2 ))" "$@"
+                time schedtool -B -e $SETIONICE make -j "$(( $(cat /proc/cpuinfo | grep "^processor" | wc -l) * 2 ))" "$@"
             fi
             ;;
     esac
