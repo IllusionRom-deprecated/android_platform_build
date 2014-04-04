@@ -1416,9 +1416,9 @@ function mka() {
             ;;
         *)
             if [ ! -z "$2" ]; then
-                time schedtool -B -e $SETIONICE make "$@"
+                time schedtool -B -e $SETIONICE make "$@" 1>>/dev/null 2>&2
             else
-                time schedtool -B -e $SETIONICE make -j "$(( $(cat /proc/cpuinfo | grep "^processor" | wc -l) * 2 ))" "$@"
+                time schedtool -B -e $SETIONICE make -j "$(( $(cat /proc/cpuinfo | grep "^processor" | wc -l) * 2 ))" "$@" 1>>/dev/null 2>&2
             fi
             ;;
     esac
