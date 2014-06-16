@@ -57,6 +57,17 @@ Usage:  ota_from_target_files [flags] input_target_files output_ota_package
       first, so that any changes made to the system partition are done
       using the new recovery (new kernel, etc.).
 
+  --backup <boolean>
+      Enable or disable the execution of backuptool.sh.
+      Disabled by default.
+
+  --override_device <device>
+      Override device-specific asserts. Can be a comma-separated list.
+
+  --override_prop <boolean>
+      Override build.prop items with custom vendor init.
+      Enabled when TARGET_UNIFIED_DEVICE is defined in BoardConfig
+
 """
 
 import sys
@@ -93,7 +104,11 @@ OPTIONS.omit_prereq = False
 OPTIONS.extra_script = None
 OPTIONS.aslr_mode = True
 OPTIONS.worker_threads = 3
+
 OPTIONS.two_step = False
+OPTIONS.backuptool = False
+OPTIONS.override_device = 'auto'
+OPTIONS.override_prop = False
 
 def MostPopularKey(d, default):
   """Given a dict, return the key corresponding to the largest
@@ -107,7 +122,7 @@ def MostPopularKey(d, default):
 def IsSymlink(info):
   """Return true if the zipfile.ZipInfo object passed in represents a
   symlink."""
-  return (info.external_attr >> 16) == 0120777
+  return (info.external_attr >> 16 & 0770000) == 0120000
 
 def IsRegular(info):
   """Return true if the zipfile.ZipInfo object passed in represents a
@@ -320,9 +335,14 @@ def SignOutput(temp_zip_name, output_zip_name):
   common.SignFile(temp_zip_name, output_zip_name, OPTIONS.package_key, pw,
                   whole_file=True)
 
-
-def AppendAssertions(script, info_dict):
-  device = GetBuildProp("ro.product.device", info_dict)
+def AppendAssertions(script, input_zip):
+  if OPTIONS.override_device == "auto":
+    if OPTIONS.override_prop:
+      device = GetBuildProp("ro.build.product", input_zip)
+    else:
+      device = GetBuildProp("ro.product.device", input_zip)
+  else:
+    device = OPTIONS.override_device
   script.AssertDevice(device)
 
 
@@ -386,13 +406,18 @@ def WriteFullOTAPackage(input_zip, output_zip):
   # change very often.
   script = edify_generator.EdifyGenerator(3, OPTIONS.info_dict)
 
-  metadata = {"post-build": GetBuildProp("ro.build.fingerprint",
-                                         OPTIONS.info_dict),
-              "pre-device": GetBuildProp("ro.product.device",
-                                         OPTIONS.info_dict),
-              "post-timestamp": GetBuildProp("ro.build.date.utc",
-                                             OPTIONS.info_dict),
-              }
+  if OPTIONS.override_prop:
+    metadata = {"post-timestamp": GetBuildProp("ro.build.date.utc",
+                                               OPTIONS.info_dict),
+                }
+  else:
+    metadata = {"post-build": GetBuildProp("ro.build.fingerprint",
+                                           OPTIONS.info_dict),
+                "pre-device": GetBuildProp("ro.product.device",
+                                           OPTIONS.info_dict),
+                "post-timestamp": GetBuildProp("ro.build.date.utc",
+                                               OPTIONS.info_dict),
+                }
 
   device_specific = common.DeviceSpecificParams(
       input_zip=input_zip,
@@ -403,10 +428,10 @@ def WriteFullOTAPackage(input_zip, output_zip):
       metadata=metadata,
       info_dict=OPTIONS.info_dict)
 
-  if not OPTIONS.omit_prereq:
-    ts = GetBuildProp("ro.build.date.utc", OPTIONS.info_dict)
-    ts_text = GetBuildProp("ro.build.date", OPTIONS.info_dict)
-    script.AssertOlderBuild(ts, ts_text)
+#  if not OPTIONS.omit_prereq:
+#    ts = GetBuildProp("ro.build.date.utc", OPTIONS.info_dict)
+#    ts_text = GetBuildProp("ro.build.date", OPTIONS.info_dict)
+#    script.AssertOlderBuild(ts, ts_text)
 
   AppendAssertions(script, OPTIONS.info_dict)
   device_specific.FullOTA_Assertions()
@@ -452,25 +477,47 @@ else if get_stage("%(bcb_dev)s", "stage") == "3/3" then
 
   device_specific.FullOTA_InstallBegin()
 
+  if OPTIONS.backuptool:
+    script.Mount("/system")
+    script.RunBackup("backup")
+    script.Unmount("/system")
+
   script.ShowProgress(0.5, 0)
 
   if OPTIONS.wipe_user_data:
+    script.Print("Formatting /data")
     script.FormatPartition("/data")
+
+  script.Print("#######################################");
+  script.Print("#                                     #");
+  script.Print("#             Illusion ROM            #");
+  script.Print("#                                     #");
+  script.Print("#######################################");
 
   if "selinux_fc" in OPTIONS.info_dict:
     WritePolicyConfig(OPTIONS.info_dict["selinux_fc"], output_zip)
 
+  script.Print("Formatting /system")
   script.FormatPartition("/system")
   script.Mount("/system")
   script.UnpackPackageDir("recovery", "/system")
+  script.Print("Extracting /system")
   script.UnpackPackageDir("system", "/system")
 
   symlinks = CopySystemFiles(input_zip, output_zip)
+  script.Print("#######################################");
+  script.Print("#                                     #");
+  script.Print("#        Symlinks & Permissions       #");
+  script.Print("#                                     #");
+  script.Print("#######################################");
   script.MakeSymlinks(symlinks)
 
   boot_img = common.GetBootableImage("boot.img", "boot.img",
                                      OPTIONS.input_tmp, "BOOT")
   MakeRecoveryPatch(OPTIONS.input_tmp, output_zip, recovery_img, boot_img)
+
+#  recovery_img = common.GetBootableImage("recovery.img", "recovery.img",
+#                                         OPTIONS.input_tmp, "RECOVERY")
 
   Item.GetMetadata(input_zip)
   Item.Get("system").SetPermissions(script)
@@ -479,10 +526,24 @@ else if get_stage("%(bcb_dev)s", "stage") == "3/3" then
   common.ZipWriteStr(output_zip, "boot.img", boot_img.data)
   script.ShowProgress(0.2, 0)
 
+  if OPTIONS.backuptool:
+    script.ShowProgress(0.2, 10)
+    script.RunBackup("restore")
+
   script.ShowProgress(0.2, 10)
+  script.Print("#######################################");
+  script.Print("#                                     #");
+  script.Print("#         Flashing the kernel         #");
+  script.Print("#                                     #");
+  script.Print("#######################################");
   script.WriteRawImage("/boot", "boot.img")
 
   script.ShowProgress(0.1, 0)
+  script.Print("#######################################");
+  script.Print("#                                     #");
+  script.Print("#          Enjoy Illusion ROM         #");
+  script.Print("#                                     #");
+  script.Print("#######################################");
   device_specific.FullOTA_InstallEnd()
 
   if OPTIONS.extra_script is not None:
@@ -547,11 +608,16 @@ def WriteIncrementalOTAPackage(target_zip, source_zip, output_zip):
   script = edify_generator.EdifyGenerator(source_version,
                                           OPTIONS.target_info_dict)
 
-  metadata = {"pre-device": GetBuildProp("ro.product.device",
-                                         OPTIONS.source_info_dict),
-              "post-timestamp": GetBuildProp("ro.build.date.utc",
-                                             OPTIONS.target_info_dict),
-              }
+  if OPTIONS.override_prop:
+    metadata = {"post-timestamp": GetBuildProp("ro.build.date.utc",
+                                               OPTIONS.target_info_dict),
+                }
+  else:
+    metadata = {"pre-device": GetBuildProp("ro.product.device",
+                                           OPTIONS.source_info_dict),
+                "post-timestamp": GetBuildProp("ro.build.date.utc",
+                                               OPTIONS.target_info_dict),
+                }
 
   device_specific = common.DeviceSpecificParams(
       source_zip=source_zip,
@@ -604,13 +670,14 @@ def WriteIncrementalOTAPackage(target_zip, source_zip, output_zip):
       patch_list.append((tf.name, tf, sf, tf.size, common.sha1(d).hexdigest()))
       largest_source_size = max(largest_source_size, sf.size)
 
-  source_fp = GetBuildProp("ro.build.fingerprint", OPTIONS.source_info_dict)
-  target_fp = GetBuildProp("ro.build.fingerprint", OPTIONS.target_info_dict)
-  metadata["pre-build"] = source_fp
-  metadata["post-build"] = target_fp
+  if not OPTIONS.override_prop:
+    source_fp = GetBuildProp("ro.build.fingerprint", OPTIONS.source_info_dict)
+    target_fp = GetBuildProp("ro.build.fingerprint", OPTIONS.target_info_dict)
+    metadata["pre-build"] = source_fp
+    metadata["post-build"] = target_fp
 
-  script.Mount("/system")
-  script.AssertSomeFingerprint(source_fp, target_fp)
+    script.Mount("/system")
+    script.AssertSomeFingerprint(source_fp, target_fp)
 
   source_boot = common.GetBootableImage(
       "/tmp/boot.img", "boot.img", OPTIONS.source_tmp, "BOOT",
@@ -620,11 +687,11 @@ def WriteIncrementalOTAPackage(target_zip, source_zip, output_zip):
   updating_boot = (not OPTIONS.two_step and
                    (source_boot.data != target_boot.data))
 
-  source_recovery = common.GetBootableImage(
-      "/tmp/recovery.img", "recovery.img", OPTIONS.source_tmp, "RECOVERY",
-      OPTIONS.source_info_dict)
-  target_recovery = common.GetBootableImage(
-      "/tmp/recovery.img", "recovery.img", OPTIONS.target_tmp, "RECOVERY")
+#  source_recovery = common.GetBootableImage(
+#      "/tmp/recovery.img", "recovery.img", OPTIONS.source_tmp, "RECOVERY",
+#      OPTIONS.source_info_dict)
+#  target_recovery = common.GetBootableImage(
+#      "/tmp/recovery.img", "recovery.img", OPTIONS.target_tmp, "RECOVERY")
   updating_recovery = (source_recovery.data != target_recovery.data)
 
   # Here's how we divide up the progress bar:
@@ -821,9 +888,16 @@ else
     script.Print("Unpacking new files...")
     script.UnpackPackageDir("system", "/system")
 
-  if updating_recovery:
-    script.Print("Unpacking new recovery...")
-    script.UnpackPackageDir("recovery", "/system")
+#  if updating_recovery:
+#    script.Print("Unpacking new recovery...")
+#    script.UnpackPackageDir("recovery", "/system")
+
+  if len(renames) > 0:
+    script.Print("Renaming files...")
+
+  for src in renames:
+    print "Renaming " + src + " to " + renames[src].name
+    script.RenameFile(src, renames[src].name)
 
   script.Print("Symlinks and permissions...")
 
@@ -894,6 +968,12 @@ def main(argv):
       OPTIONS.worker_threads = int(a)
     elif o in ("-2", "--two_step"):
       OPTIONS.two_step = True
+    elif o in ("--backup"):
+      OPTIONS.backuptool = bool(a.lower() == 'true')
+    elif o in ("--override_device"):
+      OPTIONS.override_device = a
+    elif o in ("--override_prop"):
+      OPTIONS.override_prop = bool(a.lower() == 'true')
     else:
       return False
     return True
@@ -909,7 +989,9 @@ def main(argv):
                                               "worker_threads=",
                                               "aslr_mode=",
                                               "two_step",
-                                              ],
+                                              "backup=",
+                                              "override_device=",
+                                              "override_prop="],
                              extra_option_handler=option_handler)
 
   if len(args) != 2:
